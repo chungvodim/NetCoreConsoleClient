@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace ConsoleClientWithBrowser
+namespace NetCoreConsoleClient
 {
     public static class DateTimeExtensions
     {

@@ -1,17 +1,15 @@
-﻿using IdentityModel.Client;
-using IdentityModel.OidcClient;
-using Microsoft.Extensions.Configuration;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+﻿using Microsoft.Extensions.Configuration;
 using Serilog;
 using Serilog.Core;
 using System;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace ConsoleClientWithBrowser
+namespace NetCoreConsoleClient
 {
     public class Program
     {
@@ -21,7 +19,6 @@ namespace ConsoleClientWithBrowser
         static string _authority = "https://demo.identityserver.io";
         static string _api = "https://demo.identityserver.io/api/test";
 
-        static OidcClient _oidcClient;
         static HttpClient _apiClient = new HttpClient { BaseAddress = new Uri(_api) };
 
         public static void Main(string[] args) => MainAsync().GetAwaiter().GetResult();
@@ -51,34 +48,34 @@ namespace ConsoleClientWithBrowser
         {
             using (var httpClient = new HttpClient())
             {
-                var response = httpClient.RequestPasswordTokenAsync(new PasswordTokenRequest()
+                var baseAuthUrl = "https://localhost:44300/";
+                var clientSecrect = "BiOiJKV1QiLCJ4NXQiOiKhM";
+                var clientId = "PowerBIRS";
+                var grantType = "password";
+                var scope = "openid profile";
+
+                httpClient.BaseAddress = new Uri(baseAuthUrl);
+                var content = new FormUrlEncodedContent(new[]
                 {
-                    Address = $"{_configuration["Authority"]}/connect/token",
-                    ClientId = _configuration["ClientId"],
-                    ClientSecret = _configuration["ClientSecret"],
-                    GrantType = "passwordd",
-                    Scope = _configuration["Scope"],
-                    UserName = "david.nguyen@conexus.net",
-                    Password = "123456"
-                }).GetAwaiter().GetResult();
-                ShowResult(response);
+                    new KeyValuePair<string, string>("grant_type", grantType),
+                    new KeyValuePair<string, string>("client_id", clientId),
+                    new KeyValuePair<string, string>("client_secret", clientSecrect),
+                    new KeyValuePair<string, string>("scope", scope),
+                    new KeyValuePair<string, string>("username", "david.nguyen@conexus.net"),
+                    new KeyValuePair<string, string>("password", "123456")
+                });
+                var result = await httpClient.PostAsync("/connect/token", content);
+                string resultContent = await result.Content.ReadAsStringAsync();
+                var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(resultContent);
+                ShowResult(tokenResponse);
             }
         }
 
         private static void ShowResult(TokenResponse result)
         {
-            if (result.IsError)
-            {
-                _logger.Error("\n\nError:\n{0}", result.Error);
-                return;
-            }
             var handler = new JwtSecurityTokenHandler();
             var jsonToken = handler.ReadToken(result.AccessToken) as JwtSecurityToken;
-            //_logger.Information("\n\nClaims:");
-            //foreach (var claim in jsonToken.Claims)
-            //{
-            //    _logger.Information("{0}: {1}", claim.Type, claim.Value);
-            //}
+
             var id = jsonToken.Claims
                 .Where(x => x.Type == "sub")
                 .Select(x => x.Value).FirstOrDefault();
@@ -96,62 +93,8 @@ namespace ConsoleClientWithBrowser
             var expiration = (expirationUnix * 1000).ToDateTime().ToLocalTime();
             _logger.Information($"\nid: {id}");
             _logger.Information($"\nuserName: {userName}");
-            _logger.Information($"\nroles: {JsonConvert.SerializeObject(roles)}");
+            _logger.Information($"\nroles: {JsonSerializer.Serialize(roles)}");
             _logger.Information($"\nexpiration: {expiration}");
-        }
-
-        private static async Task NextSteps(LoginResult result)
-        {
-            var currentAccessToken = result.AccessToken;
-            var currentRefreshToken = result.RefreshToken;
-
-            var menu = "  x...exit  c...call api   ";
-            if (currentRefreshToken != null) menu += "r...refresh token   ";
-
-            while (true)
-            {
-                Console.WriteLine("\n\n");
-
-                Console.Write(menu);
-                var key = Console.ReadKey();
-
-                if (key.Key == ConsoleKey.X) return;
-                if (key.Key == ConsoleKey.C) await CallApi(currentAccessToken);
-                if (key.Key == ConsoleKey.R)
-                {
-                    var refreshResult = await _oidcClient.RefreshTokenAsync(currentRefreshToken);
-                    if (refreshResult.IsError)
-                    {
-                        Console.WriteLine($"Error: {refreshResult.Error}");
-                    }
-                    else
-                    {
-                        currentRefreshToken = refreshResult.RefreshToken;
-                        currentAccessToken = refreshResult.AccessToken;
-
-                        Console.WriteLine("\n\n");
-                        Console.WriteLine($"access token:   {refreshResult.AccessToken}");
-                        Console.WriteLine($"refresh token:  {refreshResult?.RefreshToken ?? "none"}");
-                    }
-                }
-            }
-        }
-
-        private static async Task CallApi(string currentAccessToken)
-        {
-            _apiClient.SetBearerToken(currentAccessToken);
-            var response = await _apiClient.GetAsync("");
-
-            if (response.IsSuccessStatusCode)
-            {
-                var json = JArray.Parse(await response.Content.ReadAsStringAsync());
-                Console.WriteLine("\n\n");
-                Console.WriteLine(json);
-            }
-            else
-            {
-                Console.WriteLine($"Error: {response.ReasonPhrase}");
-            }
         }
     }
 }
